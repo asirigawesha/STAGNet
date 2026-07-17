@@ -51,11 +51,13 @@ MyDrive/
     ├── 300W_LP/
     ├── AFLW2000/
     └── BIWI/
-        ├── train/
-        └── test/
+        ├── 01/
+        ├── 02/
+        │   ...
+        └── 24/
 ```
 
-The exact BIWI folder structure must match the paths expected by the notebooks. Update `DATASET_ROOT` and `OUTPUT_ROOT` in each notebook before running.
+The BIWI dataset is organised by sequence number (01–24). The Protocol II notebooks read sequences directly under `BIWI/` (e.g. `BIWI/01/`, `BIWI/02/`, …) and write the extracted landmark files to a separate output directory split into `train/` and `test/` subdirectories. The exact BIWI input folder structure must match the paths expected by the notebooks. Update `DATASET_ROOT` and `OUTPUT_ROOT` in each notebook before running.
 
 ---
 
