@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.env
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE and operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Datasets
+data/
+dataset/
+datasets/raw/
+datasets/processed/
+*.npz
+*.npy
+*.mat
+*.h5
+*.hdf5
+
+# Models and checkpoints
+checkpoints/
+weights/
+models/
+*.pt
+*.pth
+*.ckpt
+*.tflite
+
+# Experiment outputs
+outputs/
+runs/
+logs/
+wandb/
+tensorboard/
+
+# Temporary files
+*.tmp
+*.log
