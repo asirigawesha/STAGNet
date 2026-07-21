@@ -1,0 +1,1 @@
+"""STAGNet Python package."""
