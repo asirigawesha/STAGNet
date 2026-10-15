@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from src.protocol_ii_gads import (
+from src.stagnet import (
     build_model,
     create_dataset,
     dump_json,
@@ -15,7 +15,6 @@ from src.protocol_ii_gads import (
     load_npz_arrays,
     make_loader,
     resolve_device,
-    save_checkpoint,
     set_seed,
     train_model,
     evaluate_model,
@@ -33,8 +32,6 @@ def build_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=5e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--pitch-weight", type=float, default=1.0)
-    parser.add_argument("--jitter-std", type=float, default=0.05)
-    parser.add_argument("--flip-prob", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--device", type=str, default=None)
     return parser
@@ -47,22 +44,20 @@ def train_from_args(args: argparse.Namespace) -> Path:
     cluster_indices = load_cluster_indices(args.cluster_indices)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    best_model_path = args.output_dir / "gads_best.pt"
+    best_model_path = args.output_dir / "stagnet_best.pt"
 
     # 2) Load arrays and validate landmark dimensionality against cluster indices.
     raw_landmarks, raw_poses = load_npz_arrays(args.data)
     if raw_landmarks.shape[1] < infer_landmark_count(cluster_indices):
         raise ValueError("The NPZ file does not contain enough landmarks for the provided cluster indices.")
 
-    # 3) Build augmented train/validation loaders for Protocol II.
+    # 3) Build train/validation loaders without modifying dataset samples.
     raw_data = {"landmark": raw_landmarks, "pose": raw_poses}
     train_loader, validate_loader = create_dataset(
         raw_data=raw_data,
         batch_size=args.batch_size,
         validation_split=args.validation_split,
         seed=args.seed,
-        jitter_std=args.jitter_std,
-        flip_prob=args.flip_prob,
     )
 
     # 4) Train, checkpoint, and persist metrics.
@@ -76,10 +71,20 @@ def train_from_args(args: argparse.Namespace) -> Path:
         weight_decay=args.weight_decay,
         pitch_weight=args.pitch_weight,
         best_model_path=best_model_path,
+        checkpoint_metadata={
+            "model": "STAGNET",
+            "protocol": "II",
+            "device": str(device),
+            "seed": args.seed,
+            "cluster_indices": cluster_indices,
+        },
     )
 
-    save_checkpoint(best_model_path, model, metadata={"device": str(device), "seed": args.seed, "cluster_indices": str(args.cluster_indices)})
+    if not best_model_path.is_file() or best_model_path.stat().st_size == 0:
+        raise RuntimeError(f"Training did not produce a checkpoint at {best_model_path}.")
+    metadata = load_checkpoint(best_model_path, model, map_location=device)
     dump_json(args.output_dir / "history.json", {k: [float(v) for v in values] for k, values in history.items()})
+    print(f"Saved and reloaded best STAGNET checkpoint: {best_model_path} (metadata: {metadata})")
     return best_model_path
 
 
@@ -99,7 +104,7 @@ def test_from_args(args: argparse.Namespace) -> Path:
         raise ValueError("The NPZ file does not contain enough landmarks for the provided cluster indices.")
 
     raw_data = {"landmark": raw_landmarks, "pose": raw_poses}
-    loader = make_loader(raw_data=raw_data, batch_size=args.batch_size, augment=False)
+    loader = make_loader(raw_data=raw_data, batch_size=args.batch_size)
     metrics = evaluate_model(model, loader)
     rows = metrics.pop("rows")
 
@@ -110,4 +115,11 @@ def test_from_args(args: argparse.Namespace) -> Path:
     summary_path = args.output_dir / "metrics.json"
     predictions_df.to_csv(predictions_path, index=False)
     dump_json(summary_path, metrics)
+    print(
+        "MAE (degrees): "
+        f"pitch={metrics['mae_pitch']:.3f}, "
+        f"yaw={metrics['mae_yaw']:.3f}, "
+        f"roll={metrics['mae_roll']:.3f}, "
+        f"mean={metrics['mae_mean']:.3f}"
+    )
     return predictions_path

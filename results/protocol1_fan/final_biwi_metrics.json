@@ -1,0 +1,8 @@
+{
+  "evaluation_dataset": "biwi",
+  "mae_mean": 4.3115553855896,
+  "mae_pitch": 5.742031097412109,
+  "mae_roll": 3.071103811264038,
+  "mae_yaw": 4.121531009674072,
+  "num_samples": 15288
+}

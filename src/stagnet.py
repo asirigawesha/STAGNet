@@ -2,7 +2,7 @@
 
 The code here is detector-agnostic: the only detector-specific inputs are the
 NPZ file containing landmarks/poses and the landmark cluster indices used by
-the GADS model.
+STAGNET.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 
 
 # Default cluster layout used when no detector-specific JSON is provided.
-POSE_ORDER = ("yaw", "pitch", "roll")
+POSE_ORDER = ("pitch", "yaw", "roll")
 DEFAULT_CLUSTER_INDICES = [
     [6, 10, 31, 32, 33, 34, 49, 50, 51, 52, 55, 56, 57, 61, 62, 64, 65, 66],
     [0, 1, 2, 3],
@@ -129,7 +129,7 @@ class DeepSet(nn.Module):
         return self.decoder(x_agg)
 
 
-class GADS(nn.Module):
+class STAGNET(nn.Module):
     def __init__(
         self,
         num_clusters: int,
@@ -153,8 +153,8 @@ class GADS(nn.Module):
 
         if deepset_outfeatures != multihead_outdim:
             raise ValueError("deepset_outfeatures must match multihead_outdim.")
-        if final_out != 3:
-            raise ValueError("This model predicts yaw, pitch, and roll only.")
+        if final_out != len(POSE_ORDER):
+            raise ValueError(f"This model predicts pose angles in {POSE_ORDER} order.")
 
         self.cluster_indices = [list(cluster) for cluster in cluster_indices]
         self.token_drop_p = token_drop_p
@@ -254,51 +254,18 @@ class HeadPoseDataset(Dataset):
         self,
         landmarks: np.ndarray,
         poses: np.ndarray,
-        augment: bool = False,
-        jitter_std: float = 0.0075,
-        flip_prob: float = 0.5,
-        flip_pairs: Sequence[tuple[int, int]] | None = None,
     ):
         self.landmarks = torch.tensor(landmarks, dtype=torch.float32)
         self.poses = torch.tensor(poses, dtype=torch.float32)
-        self.augment = augment
-        self.jitter_std = jitter_std
-        self.flip_prob = flip_prob
-        self.flip_pairs = list(flip_pairs) if flip_pairs is not None else []
 
     def __len__(self) -> int:
         return self.poses.shape[0]
 
-    def _horizontal_flip(self, landmarks: torch.Tensor, pose: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        flipped = landmarks.clone()
-        if flipped.numel() == 0:
-            return flipped, pose
-
-        x_values = flipped[:, 0]
-        if torch.max(x_values) <= 1.5 and torch.min(x_values) >= -0.5:
-            flipped[:, 0] = 1.0 - flipped[:, 0]
-        else:
-            flipped[:, 0] = -flipped[:, 0]
-
-        for left_idx, right_idx in self.flip_pairs:
-            flipped[[left_idx, right_idx]] = flipped[[right_idx, left_idx]]
-
-        flipped_pose = pose.clone()
-        flipped_pose[1] = -flipped_pose[1]
-        flipped_pose[2] = -flipped_pose[2]
-        return flipped, flipped_pose
-
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        landmarks = self.landmarks[index].clone()
-        pose = self.poses[index].clone()
-
-        if self.augment:
-            if self.jitter_std > 0:
-                landmarks = landmarks + torch.randn_like(landmarks) * self.jitter_std
-            if self.flip_prob > 0 and torch.rand(1).item() < self.flip_prob:
-                landmarks, pose = self._horizontal_flip(landmarks, pose)
-
-        return {"landmark": landmarks, "pose": pose}
+        return {
+            "landmark": self.landmarks[index],
+            "pose": self.poses[index],
+        }
 
 
 def _extract_arrays(raw_data: np.lib.npyio.NpzFile | dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
@@ -314,44 +281,17 @@ def create_dataset(
     batch_size: int,
     validation_split: float,
     seed: int,
-    jitter_std: float,
-    flip_prob: float,
     num_workers: int = 0,
-    flip_pairs: Sequence[tuple[int, int]] | None = None,
 ) -> tuple[DataLoader, DataLoader]:
-    # Build a deterministic split; apply augmentation only to the training subset.
+    # Build a deterministic split with unchanged samples in both subsets.
     landmarks, poses = _extract_arrays(raw_data)
-    base_dataset = HeadPoseDataset(
-        landmarks=landmarks,
-        poses=poses,
-        augment=False,
-        jitter_std=jitter_std,
-        flip_prob=flip_prob,
-        flip_pairs=flip_pairs,
-    )
+    dataset = HeadPoseDataset(landmarks=landmarks, poses=poses)
 
-    total_size = len(base_dataset)
+    total_size = len(dataset)
     val_size = max(1, int(total_size * validation_split))
     train_size = max(1, total_size - val_size)
     generator = torch.Generator().manual_seed(seed)
-    train_subset, val_subset = random_split(base_dataset, [train_size, total_size - train_size], generator=generator)
-
-    train_subset.dataset = HeadPoseDataset(
-        landmarks=landmarks,
-        poses=poses,
-        augment=True,
-        jitter_std=jitter_std,
-        flip_prob=flip_prob,
-        flip_pairs=flip_pairs,
-    )
-    val_subset.dataset = HeadPoseDataset(
-        landmarks=landmarks,
-        poses=poses,
-        augment=False,
-        jitter_std=0.0,
-        flip_prob=0.0,
-        flip_pairs=flip_pairs,
-    )
+    train_subset, val_subset = random_split(dataset, [train_size, total_size - train_size], generator=generator)
 
     train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
@@ -361,21 +301,10 @@ def create_dataset(
 def make_loader(
     raw_data: np.lib.npyio.NpzFile | dict[str, np.ndarray],
     batch_size: int,
-    augment: bool = False,
-    jitter_std: float = 0.0,
-    flip_prob: float = 0.0,
     num_workers: int = 0,
-    flip_pairs: Sequence[tuple[int, int]] | None = None,
 ) -> DataLoader:
     landmarks, poses = _extract_arrays(raw_data)
-    dataset = HeadPoseDataset(
-        landmarks=landmarks,
-        poses=poses,
-        augment=augment,
-        jitter_std=jitter_std,
-        flip_prob=flip_prob,
-        flip_pairs=flip_pairs,
-    )
+    dataset = HeadPoseDataset(landmarks=landmarks, poses=poses)
     return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
 
@@ -394,8 +323,8 @@ class Engine:
         self.base_loss = nn.SmoothL1Loss()
 
     def weighted_pose_loss(self, predictions: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, dict[str, float]]:
-        yaw_loss = self.base_loss(predictions[:, 0], targets[:, 0])
-        pitch_loss = self.base_loss(predictions[:, 1], targets[:, 1])
+        pitch_loss = self.base_loss(predictions[:, 0], targets[:, 0])
+        yaw_loss = self.base_loss(predictions[:, 1], targets[:, 1])
         roll_loss = self.base_loss(predictions[:, 2], targets[:, 2])
         total_loss = yaw_loss + self.pitch_weight * pitch_loss + roll_loss
         return total_loss, {
@@ -437,8 +366,8 @@ class Engine:
 
         return {
             "loss": running_loss / sample_count,
-            "mae_yaw": (running_mae[0] / sample_count).item(),
-            "mae_pitch": (running_mae[1] / sample_count).item(),
+            "mae_pitch": (running_mae[0] / sample_count).item(),
+            "mae_yaw": (running_mae[1] / sample_count).item(),
             "mae_roll": (running_mae[2] / sample_count).item(),
             "yaw_loss": metric_totals["yaw_loss"] / sample_count,
             "pitch_loss": metric_totals["pitch_loss"] / sample_count,
@@ -465,8 +394,8 @@ class Engine:
 
         return {
             "loss": running_loss / sample_count,
-            "mae_yaw": (running_mae[0] / sample_count).item(),
-            "mae_pitch": (running_mae[1] / sample_count).item(),
+            "mae_pitch": (running_mae[0] / sample_count).item(),
+            "mae_yaw": (running_mae[1] / sample_count).item(),
             "mae_roll": (running_mae[2] / sample_count).item(),
             "mae_mean": (running_mae.sum() / (3 * sample_count)).item(),
         }
@@ -486,10 +415,10 @@ def build_model(
     dropout: float = 0.01,
     num_heads: int = 2,
     multihead_outdim: int = 32,
-) -> GADS:
-    # Assemble GADS with a configurable cluster layout and initialize linear weights.
+) -> STAGNET:
+    # Assemble STAGNET with a configurable cluster layout and initialize linear weights.
     indices = cluster_indices if cluster_indices is not None else DEFAULT_CLUSTER_INDICES
-    model = GADS(
+    model = STAGNET(
         num_clusters=len(indices),
         cluster_indices=indices,
         deepset_infeatures=3,
@@ -526,7 +455,6 @@ def evaluate_model(model: nn.Module, loader: DataLoader) -> dict[str, object]:
     model.eval()
 
     total_mae = torch.zeros(3, device=device)
-    total_mse = torch.zeros(3, device=device)
     rows: list[dict[str, float]] = []
     sample_count = 0
 
@@ -538,34 +466,29 @@ def evaluate_model(model: nn.Module, loader: DataLoader) -> dict[str, object]:
         errors = predictions - poses
         abs_errors = errors.abs()
         total_mae += abs_errors.sum(dim=0)
-        total_mse += (errors ** 2).sum(dim=0)
         sample_count += landmarks.size(0)
 
         for pred, gt, err in zip(predictions.cpu(), poses.cpu(), abs_errors.cpu()):
             rows.append(
                 {
-                    "gt_yaw": float(gt[0]),
-                    "gt_pitch": float(gt[1]),
+                    "gt_pitch": float(gt[0]),
+                    "gt_yaw": float(gt[1]),
                     "gt_roll": float(gt[2]),
-                    "pred_yaw": float(pred[0]),
-                    "pred_pitch": float(pred[1]),
+                    "pred_pitch": float(pred[0]),
+                    "pred_yaw": float(pred[1]),
                     "pred_roll": float(pred[2]),
-                    "yaw_abs_error": float(err[0]),
-                    "pitch_abs_error": float(err[1]),
+                    "pitch_abs_error": float(err[0]),
+                    "yaw_abs_error": float(err[1]),
                     "roll_abs_error": float(err[2]),
                 }
             )
 
     mae = total_mae / sample_count
-    rmse = torch.sqrt(total_mse / sample_count)
     return {
-        "mae_yaw": float(mae[0]),
-        "mae_pitch": float(mae[1]),
+        "mae_pitch": float(mae[0]),
+        "mae_yaw": float(mae[1]),
         "mae_roll": float(mae[2]),
         "mae_mean": float(mae.mean()),
-        "rmse_yaw": float(rmse[0]),
-        "rmse_pitch": float(rmse[1]),
-        "rmse_roll": float(rmse[2]),
         "rows": rows,
     }
 
@@ -579,8 +502,12 @@ def train_model(
     weight_decay: float,
     pitch_weight: float,
     best_model_path: str | Path,
+    checkpoint_metadata: dict[str, object] | None = None,
 ) -> dict[str, list[float]]:
     # Main optimization loop with cosine restarts and best-checkpoint tracking.
+    if num_epochs <= 0:
+        raise ValueError("num_epochs must be greater than zero.")
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1)
     engine = Engine(model, optimizer, total_steps=num_epochs * max(len(train_loader), 1), pitch_weight=pitch_weight)
@@ -588,6 +515,9 @@ def train_model(
     history: dict[str, list[float]] = {
         "train_loss": [],
         "val_mae": [],
+        "val_mae_pitch": [],
+        "val_mae_yaw": [],
+        "val_mae_roll": [],
         "train_yaw_loss": [],
         "train_pitch_loss": [],
         "train_roll_loss": [],
@@ -601,17 +531,29 @@ def train_model(
 
         history["train_loss"].append(train_metrics["loss"])
         history["val_mae"].append(valid_metrics["mae_mean"])
+        history["val_mae_pitch"].append(valid_metrics["mae_pitch"])
+        history["val_mae_yaw"].append(valid_metrics["mae_yaw"])
+        history["val_mae_roll"].append(valid_metrics["mae_roll"])
         history["train_yaw_loss"].append(train_metrics["yaw_loss"])
         history["train_pitch_loss"].append(train_metrics["pitch_loss"])
         history["train_roll_loss"].append(train_metrics["roll_loss"])
 
         if valid_metrics["mae_mean"] < best_valid_mae:
             best_valid_mae = valid_metrics["mae_mean"]
-            save_checkpoint(best_model_path, model, metadata={"best_valid_mae": best_valid_mae, "epoch": epoch + 1})
+            metadata = {
+                **(checkpoint_metadata or {}),
+                "best_valid_mae": best_valid_mae,
+                "epoch": epoch + 1,
+            }
+            save_checkpoint(best_model_path, model, metadata=metadata)
 
         print(
             f"Epoch {epoch + 1:03d}/{num_epochs} "
-            f"train_loss={train_metrics['loss']:.4f} val_mae={valid_metrics['mae_mean']:.4f}"
+            f"train_loss={train_metrics['loss']:.4f} "
+            f"val_mae_pitch={valid_metrics['mae_pitch']:.4f} "
+            f"val_mae_yaw={valid_metrics['mae_yaw']:.4f} "
+            f"val_mae_roll={valid_metrics['mae_roll']:.4f} "
+            f"val_mae_mean={valid_metrics['mae_mean']:.4f}"
         )
 
     return history

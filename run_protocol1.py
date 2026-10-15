@@ -18,11 +18,17 @@ def build_parser() -> argparse.ArgumentParser:
         train_parser = subparsers.add_parser(f"train-{name}", help=f"Train the Protocol I {name.upper()} model")
         train_parser.add_argument("--train-data", type=Path, default=config.train_data)
         train_parser.add_argument("--test-data", type=Path, default=config.test_data)
+        train_parser.add_argument("--biwi-test-data", type=Path, default=config.biwi_test_data)
+        train_parser.add_argument(
+            "--evaluation-dataset",
+            choices=("aflw", "biwi"),
+            default="aflw",
+            help="Dataset used for validation and best-checkpoint selection",
+        )
         train_parser.add_argument("--cluster-indices", type=Path, default=config.cluster_indices)
         train_parser.add_argument("--output-dir", type=Path, default=config.output_dir)
         train_parser.add_argument("--epochs", type=int, default=config.epochs)
         train_parser.add_argument("--batch-size", type=int, default=config.batch_size)
-        train_parser.add_argument("--validation-split", type=float, default=config.validation_split)
         train_parser.add_argument("--learning-rate", type=float, default=config.learning_rate)
         train_parser.add_argument("--weight-decay", type=float, default=config.weight_decay)
         train_parser.add_argument("--pitch-weight", type=float, default=config.pitch_weight)
@@ -31,10 +37,23 @@ def build_parser() -> argparse.ArgumentParser:
 
         test_parser = subparsers.add_parser(f"test-{name}", help=f"Evaluate the Protocol I {name.upper()} model")
         test_parser.add_argument("--test-data", type=Path, default=config.test_data)
+        test_parser.add_argument("--biwi-test-data", type=Path, default=config.biwi_test_data)
+        test_parser.add_argument(
+            "--evaluation-dataset",
+            choices=("aflw", "biwi"),
+            default="aflw",
+            help="Dataset to evaluate (default: aflw)",
+        )
         test_parser.add_argument("--checkpoint", type=Path, required=True)
         test_parser.add_argument("--cluster-indices", type=Path, default=config.cluster_indices)
         test_parser.add_argument("--output-dir", type=Path, default=config.output_dir)
         test_parser.add_argument("--batch-size", type=int, default=config.batch_size)
+        test_parser.add_argument(
+            "--max-samples",
+            type=int,
+            default=None,
+            help="Limit samples from the selected evaluation dataset",
+        )
         test_parser.add_argument("--device", type=str, default=None)
 
     return parser

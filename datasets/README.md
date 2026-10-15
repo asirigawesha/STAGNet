@@ -7,7 +7,7 @@
 
 ## Download Links
 
-The prepared datasets are shared through Google Drive to support research reproducibility and consistent preprocessing. The pose labels follow the order **[yaw, pitch, roll]** and images are resized to **224 × 224** before landmark extraction.
+The prepared datasets are shared through Google Drive to support research reproducibility and consistent preprocessing. The pose labels follow the order **[pitch, yaw, roll]** and images are resized to **224 × 224** before landmark extraction.
 
 | Dataset | Purpose | Prepared dataset link | Original source |
 |---|---|---|---|
@@ -69,8 +69,8 @@ All images are resized to **224 × 224** pixels before landmark extraction is pe
 
 ## Pose Label Order
 
-All prepared datasets use the consistent label order:
+All prepared datasets store pose labels in this order:
 
 ```
-[yaw, pitch, roll]
+[pitch, yaw, roll]
 ```

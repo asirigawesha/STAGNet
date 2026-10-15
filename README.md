@@ -18,7 +18,7 @@ STAG-Net is a landmark-based head pose estimation framework designed for lightwe
 - [x] Protocol I training and testing code
 - [x] Protocol II training and testing code
 - [x] Detector-specific Protocol I and Protocol II config files
-- [x] Shared detector-agnostic GADS model and data utilities
+- [x] Shared detector-agnostic STAGNET model and data utilities
 
 
 ---
@@ -27,7 +27,7 @@ STAG-Net is a landmark-based head pose estimation framework designed for lightwe
 
 ### Protocol I: Cross-Dataset Evaluation
 
-The model is trained on **300W-LP** and evaluated on **AFLW2000** and **BIWI**. This protocol measures cross-dataset generalisation from synthetic training data to real-world test sets. The Protocol I Python entrypoint is [`run_protocol1.py`](run_protocol1.py).
+The model is trained on all **300W-LP** samples. During training, choose **AFLW2000** or the full **BIWI** set as the validation dataset for best-checkpoint selection with `--evaluation-dataset aflw|biwi`. The selected dataset is also evaluated at the end of training and its metrics/predictions are saved. Since the full selected set is used for checkpoint selection, that final MAE is not an independent test estimate. The Protocol I Python entrypoint is [`run_protocol1.py`](run_protocol1.py).
 
 ### Protocol II: Subject-Independent BIWI Evaluation
 
@@ -49,7 +49,7 @@ Both detectors are supported in the training and testing pipelines, and BIWI bui
 
 ## Datasets
 
-The paper uses three datasets: **300W-LP**, **AFLW2000**, and **BIWI**. The prepared files in this repository follow a consistent pose order of `[pitch, yaw, roll]`.
+The paper uses three datasets: **300W-LP**, **AFLW2000**, and **BIWI**. Pose arrays in prepared datasets use the order `[pitch, yaw, roll]`.
 
 Dataset archives are not committed to Git. Prepared versions are shared through Google Drive for research reproducibility and consistent preprocessing.
 
@@ -74,6 +74,19 @@ The folder includes:
 
 See [`datasets/README.md`](datasets/README.md) for additional dataset instructions.
 
+### Changing Dataset Locations
+
+The Protocol I defaults expect these prepared NPZ files under `datasets/all/`:
+
+| Detector | Training (300W-LP) | AFLW validation/test | Full BIWI validation/test |
+|---|---|---|---|
+| FaceMesh | `300WLP_FaceMesh.npz` | `AFLW_FaceMesh.npz` | `BIWI_FaceMesh.npz` |
+| FAN | `300WLP_FAN.npz` | `AFLW_fan.npz` | `BIWI_FAN.npz` |
+
+If you store these files in another directory, either pass their locations on the command line or change `DATA_ROOT` and the corresponding filenames in [`protocol1/configs.py`](protocol1/configs.py). For Protocol I training, `--train-data` sets the 300W-LP file, `--test-data` sets AFLW, and `--biwi-test-data` sets BIWI. Choose the validation/checkpoint-selection dataset with `--evaluation-dataset aflw` or `--evaluation-dataset biwi`. For Protocol I testing, select one dataset per run with `--evaluation-dataset aflw` (default) or `--evaluation-dataset biwi`; `--test-data` sets the AFLW file and `--biwi-test-data` sets the BIWI file.
+
+Protocol II accepts its dataset path directly through `--data` for either training or testing, so you do not need to change its config to point at a different NPZ. For example, use `--data /path/to/BIWI_FAN.npz`.
+
 ---
 
 ## Repository Structure
@@ -92,7 +105,7 @@ STAGNet/
 │   ├── protocol2_facemesh_cluster_indices.json
 │   └── protocol2_fan_cluster_indices.json
 ├── src/
-│   └── protocol_ii_gads.py            # Shared detector-agnostic model/data code
+│   └── stagnet.py                     # STAGNET model and shared training/evaluation utilities
 └── datasets/
   ├── README.md
   ├── build_biwi_facemesh.py         # BIWI FaceMesh landmark builder
@@ -103,7 +116,7 @@ STAGNet/
 
 - `run_protocol1.py` and `run_protocol2.py`: the main command-line entrypoints, each with train and test subcommands.
 - `protocol1/` and `protocol2/`: protocol-specific defaults, data paths, and shared orchestration logic.
-- `src/protocol_ii_gads.py`: the shared GADS model, dataset wrappers, training loop, evaluation loop, checkpoint utilities, and detector-agnostic helpers.
+- `src/stagnet.py`: the STAGNET model, dataset wrappers, training loop, evaluation loop, checkpoint utilities, and detector-agnostic helpers.
 - `configs/`: cluster-index JSON files for FaceMesh and FAN, for both Protocol I and Protocol II.
 - `datasets/build_biwi_facemesh.py`: BIWI FaceMesh builder (split, detect, normalize, save).
 - `datasets/build_biwi_fan.py`: BIWI FAN builder (split, detect, normalize, save).
@@ -117,6 +130,7 @@ Protocol I uses one CLI with subcommands:
 
 ```bash
 python run_protocol1.py train-facemesh
+python run_protocol1.py train-fan --evaluation-dataset biwi
 python run_protocol1.py test-facemesh --test-data <path> --checkpoint <path-to-model.pt>
 python run_protocol1.py train-fan
 python run_protocol1.py test-fan --test-data <path> --checkpoint <path-to-model.pt>
@@ -131,7 +145,36 @@ python run_protocol2.py train-fan --data <path-to-npz>
 python run_protocol2.py test-fan --data <path-to-npz> --checkpoint <path-to-model.pt>
 ```
 
-For Protocol I, the defaults point at the dataset files used in this repository release. For Protocol II, pass the NPZ file you want to train or evaluate on together with the matching cluster-index JSON file.
+For Protocol I, the defaults point at the dataset files used in this repository release. Set `--evaluation-dataset aflw` (the default) or `--evaluation-dataset biwi` when training to select which full dataset validates and selects the best checkpoint. For Protocol II, pass the NPZ file you want to train or evaluate on together with the matching cluster-index JSON file.
+
+### Quick FaceMesh AFLW Demo for Reviewers
+
+This demo runs evaluation only; it does not train a model or extract landmarks. Download the prepared FaceMesh `AFLW_FaceMesh.npz` dataset and obtain a FaceMesh checkpoint already trained on 300W-LP.
+
+Checkpoints produced by Protocol I training are saved as `results/protocol1_facemesh/stagnet_best.pt` for FaceMesh and `results/protocol1_fan/stagnet_best.pt` for FAN. These model files are not included in the repository. If you download a pretrained FaceMesh checkpoint, place it in the repository's ignored `models/` directory, for example:
+
+```text
+STAGNet/
+└── models/
+    └── protocol1_facemesh/
+        └── stagnet_best.pt
+```
+
+Create the directory if needed (`mkdir -p models/protocol1_facemesh`). You can instead keep the checkpoint anywhere accessible; pass its actual location to `--checkpoint`. From the repository root, run:
+
+```bash
+python3 run_protocol1.py test-facemesh \
+  --test-data datasets/all/AFLW_FaceMesh.npz \
+  --checkpoint models/protocol1_facemesh/stagnet_best.pt \
+  --cluster-indices configs/protocol1_facemesh_cluster_indices.json \
+  --output-dir results/reviewer_demo_facemesh \
+  --batch-size 256 \
+  --max-samples 200
+```
+
+The command evaluates 200 AFLW samples; Protocol I testing evaluates only the selected dataset. This is a smoke demo, not a full AFLW2000 benchmark result. It prints pitch/yaw/roll and mean MAE, and writes `predictions.csv` and `metrics.json` under `results/reviewer_demo_facemesh/`.
+
+For a full AFLW evaluation, remove `--max-samples 200`. To evaluate BIWI instead, run the command with `--evaluation-dataset biwi`; it reads the configured BIWI dataset and writes `biwi_predictions.csv` and `biwi_metrics.json`. The checkpoint must use the FaceMesh detector and matching cluster-index configuration. This repository does not include pretrained checkpoint files or dataset archives; obtain both separately. Runtime depends on hardware and excludes Python startup, file loading, and writing results.
 
 ---
 
@@ -157,7 +200,7 @@ The training and evaluation code for both protocols lives in [run_protocol1.py](
 Each generated sample should associate:
 
 - facial landmark coordinates;
-- pitch, yaw, and roll angles;
+- pitch, yaw, and roll angles, in that order;
 - sample or frame identifier, when available;
 - detector validity information, when available.
 

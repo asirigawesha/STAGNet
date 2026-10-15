@@ -130,12 +130,12 @@ def read_biwi_pose_txt(pose_path: Path):
     return arr[:3, :3]
 
 
-def rotation_to_yaw_pitch_roll_degrees(R):
+def rotation_to_pitch_yaw_roll_degrees(R):
     rt = R.T
     roll = -np.arctan2(rt[1, 0], rt[0, 0]) * 180.0 / np.pi
     yaw = -np.arctan2(-rt[2, 0], np.sqrt(rt[2, 1] ** 2 + rt[2, 2] ** 2)) * 180.0 / np.pi
     pitch = np.arctan2(rt[2, 1], rt[2, 2]) * 180.0 / np.pi
-    return float(yaw), float(pitch), float(roll)
+    return float(pitch), float(yaw), float(roll)
 
 
 def list_subject_dirs(biwi_root: Path):
@@ -217,7 +217,7 @@ def build_split(subject_list, detector, ssd_net, name="split"):
 
             try:
                 R = read_biwi_pose_txt(pose_path)
-                yaw, pitch, roll = rotation_to_yaw_pitch_roll_degrees(R)
+                pitch, yaw, roll = rotation_to_pitch_yaw_roll_degrees(R)
                 label = np.array([pitch, yaw, roll], dtype=np.float32)
             except Exception:
                 stats["pose_read_fail"] += 1
