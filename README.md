@@ -2,6 +2,26 @@
 
 STAG-Net is a landmark-based head pose estimation framework designed for lightweight and research-oriented deployment. It predicts **yaw**, **pitch**, and **roll** from facial landmarks using a pipeline built around spatial landmark grouping, DeepSet-based group encoding, inter-group attention, and compact regression heads.
 
+This repository provides training and evaluation code for Protocol I cross-dataset experiments and Protocol II subject-independent BIWI experiments, with support for FaceMesh and FAN landmarks. Prepared dataset archives and pretrained checkpoints are distributed separately and are not included in Git.
+
+### Quick Start: Evaluate a Saved FaceMesh Model on AFLW
+
+1. Download the prepared FaceMesh `AFLW_FaceMesh.npz` file from the [prepared datasets Google Drive folder](https://drive.google.com/drive/folders/1s5tV8XYzb3rpd4x2NDV4nfngADPlXzVr?usp=sharing) and place it at `datasets/all/AFLW_FaceMesh.npz`.
+2. Obtain a saved FaceMesh Protocol I checkpoint and place it at `models/protocol1_facemesh/stagnet_best.pt` (or update the command with its actual location).
+3. From the repository root, run:
+
+```bash
+python3 run_protocol1.py test-facemesh \
+  --evaluation-dataset aflw \
+  --test-data datasets/all/AFLW_FaceMesh.npz \
+  --checkpoint models/protocol1_facemesh/stagnet_best.pt \
+  --cluster-indices configs/protocol1_facemesh_cluster_indices.json \
+  --output-dir results/protocol1_facemesh \
+  --batch-size 128
+```
+
+This evaluates the full AFLW file only and writes the MAE summary and predictions to `results/protocol1_facemesh/`. The checkpoint must be compatible with the FaceMesh detector and cluster-index configuration.
+
 > [!NOTE]
 > This repository now includes reusable Python code for Protocol I and Protocol II training and testing, plus BIWI landmark builder scripts for FaceMesh and FAN. 300W-LP and AFLW landmark extraction code will be added later.
 
